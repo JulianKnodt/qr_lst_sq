@@ -21,9 +21,15 @@ pub fn normalize<const N: usize>(v: [F; N]) -> [F; N] {
 pub fn dot<const N: usize>(a: [F; N], b: [F; N]) -> F {
     (0..N).map(|i| a[i] * b[i]).sum::<F>()
 }
+
 pub fn norm<const N: usize>(v: [F; N]) -> F {
     dot(v, v).max(0.).sqrt()
 }
+
+pub fn norm_iter(v: impl IntoIterator<Item = F>) -> F {
+    v.into_iter().map(|v| v * v).sum::<F>().max(0.).sqrt()
+}
+
 pub fn sub<const N: usize>(a: [F; N], b: [F; N]) -> [F; N] {
     from_fn(|i| a[i] - b[i])
 }
@@ -81,6 +87,7 @@ pub fn mgs_qr<const R: usize, const C: usize>(a: Matrix<R, C>) -> (Matrix<R, C>,
             vs[j] = sub(vs[j], kmul(r[i][j], q_i));
         }
     }
+
     (q, r)
 }
 
@@ -101,11 +108,22 @@ pub fn qr_solve<const R: usize, const C: usize>(
     r: Matrix<C, C>,
     b: [F; R],
 ) -> [F; C] {
-    let qtb = matmul(transpose(q), transpose([b]));
-    upper_right_triangular_solve(r, transpose(qtb)[0])
+    let qtb = vecmul(transpose(q), b);
+    upper_right_triangular_solve(r, qtb)
 }
 
-pub fn matmul<const R: usize, const C: usize, const C2: usize>(
+pub fn vecmul<const R: usize, const C: usize>(a: Matrix<R, C>, b: [F; C]) -> [F; R] {
+    let mut out = [0.; R];
+    for i in 0..R {
+        for k in 0..C {
+            out[i] += a[i][k] * b[k];
+        }
+    }
+    out
+}
+
+/*
+fn matmul<const R: usize, const C: usize, const C2: usize>(
     a: Matrix<R, C>,
     b: Matrix<C, C2>,
 ) -> Matrix<R, C2> {
@@ -120,15 +138,91 @@ pub fn matmul<const R: usize, const C: usize, const C2: usize>(
 
     out
 }
+*/
 
 #[test]
 fn test_qr_decomp() {
-    let v = [[2., 0.], [0., 1.], [2., 2.]];
-    //let v = [[1., 2.], [3., 4.], [5., 6.]];
-    let (q, r) = mgs_qr(v);
-    let s = upper_right_triangular_solve(r, [1., 1.]);
-    assert_eq!([[1.]; 2], matmul(r, transpose([s])));
+    let a = [[2., 0.], [0., 1.], [2., 2.]];
+    let b = [1.; 3];
 
-    let v = qr_solve(q, r, [1., 1., 1.]);
+    let (q, r) = mgs_qr(a);
+    //assert_eq!(a, matmul(q,r));
+    //assert_eq!(matmul(transpose(q),q), [[1., 0.], [0., 1.]]);
 
+    println!("{r:?}");
+
+    //let s = upper_right_triangular_solve(r, [1., 1.]);
+    //assert_eq!([1.; 2], vecmul(r, s));
+    let qtb = vecmul(transpose(q), b);
+    upper_right_triangular_solve(r, qtb);
+
+    let x = qr_solve(q, r, b);
+    assert!((x[0] - 0.3333).abs() < 1e-4);
+    assert!((x[1] - 0.3333).abs() < 1e-4);
+}
+
+/// Dynamic QR solving with variable number of rows.
+/// Uses `a` as a buffer.
+pub fn dyn_mgs_qr<const C: usize>(a: &mut [[F; C]], q: &mut Vec<[F; C]>) -> Matrix<C, C> {
+    let nr = a.len();
+    q.resize(nr, [0.; C]);
+    let mut r = [[0.; C]; C];
+
+    for i in 0..C {
+        r[i][i] = norm_iter((0..nr).map(|ri| a[ri][i]));
+        let irii = r[i][i].recip();
+        for ri in 0..nr {
+            q[ri][i] = irii * a[ri][i];
+        }
+
+        for j in i..C {
+            r[i][j] = (0..nr).map(|ri| a[ri][j] * q[ri][i]).sum::<F>();
+            let rij = r[i][j];
+            for ri in 0..nr {
+                a[ri][j] -= rij * q[ri][i];
+            }
+        }
+    }
+
+    r
+}
+
+/// (RxC)^T (Rx1)
+pub fn dyn_transpose_vecmul<const C: usize>(a: &[[F; C]], b: impl Fn(usize) -> F) -> [F; C] {
+    let mut out = [0.; C];
+    let nr = a.len();
+    for i in 0..nr {
+        let b_i = b(i);
+        for j in 0..C {
+            out[j] += a[i][j] * b_i;
+        }
+    }
+    out
+}
+
+pub fn dyn_qr_solve<const C: usize>(
+    q: &[[F; C]],
+    r: Matrix<C, C>,
+    b: impl Fn(usize) -> F,
+) -> [F; C] {
+    upper_right_triangular_solve(r, dyn_transpose_vecmul(q, b))
+}
+
+#[test]
+fn test_dyn_qr_decomp() {
+    let mut v = [[2., 0.], [0., 1.], [2., 2.]];
+    let (q, _r) = mgs_qr(v);
+
+    let mut dq = vec![];
+    let dr = dyn_mgs_qr(&mut v, &mut dq);
+
+    assert_eq!(
+        dyn_transpose_vecmul(&dq, |_| 1.),
+        vecmul(transpose(q), [1.; 3])
+    );
+
+    let x = dyn_qr_solve(&dq, dr, |_| 1.);
+    println!("{x:?}");
+    assert!((x[0] - 0.33333).abs() < 1e-3);
+    assert!((x[1] - 0.33333).abs() < 1e-3);
 }
