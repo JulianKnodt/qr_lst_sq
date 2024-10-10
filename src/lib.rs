@@ -93,16 +93,24 @@ pub fn mgs_qr<const R: usize, const C: usize>(a: Matrix<R, C>) -> (Matrix<R, C>,
 
 pub fn upper_right_triangular_solve<const N: usize>(u: Matrix<N, N>, b: [F; N]) -> [F; N] {
     let mut out = [0.; N];
+    let rcond = N as F * F::EPSILON;
     for i in (0..N).rev() {
         let mut curr = b[i];
         for j in i..N {
             curr -= out[j] * u[i][j];
+        }
+        // explicitly skip values which are near 0.
+        // FIXME, decide whether this makes sense if u[i][i] also near 0.
+        if curr.abs() <= rcond {
+            continue;
         }
         out[i] = curr / u[i][i];
     }
     out
 }
 
+/// QR solve a fixed size matrix.
+// TODO need to handle case where R < C (Underdetermined matrix)
 pub fn qr_solve<const R: usize, const C: usize>(
     q: Matrix<R, C>,
     r: Matrix<C, C>,
