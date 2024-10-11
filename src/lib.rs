@@ -116,8 +116,47 @@ pub fn qr_solve<const R: usize, const C: usize>(
     r: Matrix<C, C>,
     b: [F; R],
 ) -> [F; C] {
+    assert!(
+        R >= C,
+        "Underdetermined system, decompose A^T and pass to qr_solve_underdetermined"
+    );
     let qtb = vecmul(transpose(q), b);
     upper_right_triangular_solve(r, qtb)
+}
+
+/// Solve a system defined by `U^t x = b`
+fn right_tri_transposed_solve<const R: usize, const C: usize>(
+    u: Matrix<R, R>,
+    b: [F; C],
+) -> [F; C] {
+    assert!(C < R);
+    let mut out = [0.; C];
+    let rcond = R as F * F::EPSILON;
+    for i in 0..C {
+        let mut curr = b[i];
+        for j in 0..i {
+            curr -= out[j] * u[j][i];
+        }
+        // explicitly skip values which are near 0.
+        // FIXME, decide whether this makes sense if u[i][i] also near 0.
+        if curr.abs() <= rcond {
+            continue;
+        }
+        out[i] = curr / u[i][i];
+    }
+    out
+}
+
+/// QR solve an underdetermined system, where R < C.
+/// When computing the QR factorization, compute it for A^T instead.
+pub fn qr_solve_underdetermined<const R: usize, const C: usize>(
+    q: Matrix<C, R>,
+    r: Matrix<C, C>,
+    b: [F; R],
+) -> [F; C] {
+    assert!(R < C);
+    let rb = right_tri_transposed_solve(r, b);
+    vecmul(q, rb)
 }
 
 pub fn vecmul<const R: usize, const C: usize>(a: Matrix<R, C>, b: [F; C]) -> [F; R] {
@@ -213,6 +252,7 @@ pub fn dyn_qr_solve<const C: usize>(
     r: Matrix<C, C>,
     b: impl Fn(usize) -> F,
 ) -> [F; C] {
+    assert!(q.len() >= C);
     upper_right_triangular_solve(r, dyn_transpose_vecmul(q, b))
 }
 
