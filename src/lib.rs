@@ -1,6 +1,10 @@
+/// Floating point type.
+/// Can be changed to f64 with `--feature f64`
 #[cfg(not(feature = "f64"))]
 pub type F = f32;
 
+/// Floating point type.
+/// Can be changed to f64 with `--feature f64`
 #[cfg(feature = "f64")]
 pub type F = f64;
 
@@ -8,63 +12,32 @@ use std::array::from_fn;
 
 type Matrix<const R: usize, const C: usize> = [[F; C]; R];
 
-#[inline]
-pub fn normalize<const N: usize>(v: [F; N]) -> [F; N] {
-    let sum: F = v.iter().map(|v| v * v).sum();
-    if sum < 1e-8 {
-        return [0.; N];
-    }
-    let s = sum.sqrt();
-    v.map(|v| v / s)
-}
-
-pub fn dot<const N: usize>(a: [F; N], b: [F; N]) -> F {
+fn dot<const N: usize>(a: [F; N], b: [F; N]) -> F {
     (0..N).map(|i| a[i] * b[i]).sum::<F>()
 }
 
-pub fn norm<const N: usize>(v: [F; N]) -> F {
+fn norm<const N: usize>(v: [F; N]) -> F {
     dot(v, v).max(0.).sqrt()
 }
 
-pub fn norm_iter(v: impl IntoIterator<Item = F>) -> F {
+fn norm_iter(v: impl IntoIterator<Item = F>) -> F {
     v.into_iter().map(|v| v * v).sum::<F>().max(0.).sqrt()
 }
 
-pub fn sub<const N: usize>(a: [F; N], b: [F; N]) -> [F; N] {
+fn sub<const N: usize>(a: [F; N], b: [F; N]) -> [F; N] {
     from_fn(|i| a[i] - b[i])
 }
-pub fn kmul<const N: usize>(k: F, a: [F; N]) -> [F; N] {
+fn kmul<const N: usize>(k: F, a: [F; N]) -> [F; N] {
     a.map(|v| v * k)
 }
 
+/// Transpose a 2D array [[F; C]; R] -> [[F; R]; C].
 pub fn transpose<const M: usize, const N: usize>(a: Matrix<M, N>) -> Matrix<N, M> {
     from_fn(|i| from_fn(|j| a[j][i]))
 }
 
-pub fn qr<const R: usize, const C: usize>(a: Matrix<R, C>) -> (Matrix<R, C>, Matrix<C, C>) {
-    let mut q = [[0.; C]; R];
-    let mut r = [[0.; C]; C];
-
-    for j in 0..C {
-        // current column
-        let mut curr: [_; R] = from_fn(|i| a[i][j]);
-        for i in 0..j {
-            r[i][j] = dot(q[i], a[j]);
-            let q_i = std::array::from_fn(|j| q[j][i]);
-            curr = sub(curr, kmul(r[i][j], q_i));
-        }
-
-        let rjj = norm(curr);
-        r[j][j] = rjj;
-        let irjj = rjj.recip();
-
-        for i in 0..R {
-            q[i][j] = irjj * curr[i];
-        }
-    }
-    (q, r)
-}
-
+/// Decompose A: [[F; C]; R] into (Q,R): ([[F; C]; R], [[F; C];C]), where A = QR.
+/// `mgs` stands for modified gram schmidt, which is the algorithm for QR decomposition.
 pub fn mgs_qr<const R: usize, const C: usize>(a: Matrix<R, C>) -> (Matrix<R, C>, Matrix<C, C>) {
     let mut q = [[0.; C]; R];
     let mut r = [[0.; C]; C];
@@ -91,7 +64,7 @@ pub fn mgs_qr<const R: usize, const C: usize>(a: Matrix<R, C>) -> (Matrix<R, C>,
     (q, r)
 }
 
-pub fn upper_right_triangular_solve<const N: usize>(u: Matrix<N, N>, b: [F; N]) -> [F; N] {
+fn upper_right_triangular_solve<const N: usize>(u: Matrix<N, N>, b: [F; N]) -> [F; N] {
     let mut out = [0.; N];
     let rcond = N as F * F::EPSILON;
     for i in (0..N).rev() {
@@ -124,42 +97,7 @@ pub fn qr_solve<const R: usize, const C: usize>(
     upper_right_triangular_solve(r, qtb)
 }
 
-/// Solve a system defined by `U^t x = b`
-fn right_tri_transposed_solve<const R: usize, const C: usize>(
-    u: Matrix<R, R>,
-    b: [F; C],
-) -> [F; C] {
-    assert!(C < R);
-    let mut out = [0.; C];
-    let rcond = R as F * F::EPSILON;
-    for i in 0..C {
-        let mut curr = b[i];
-        for j in 0..i {
-            curr -= out[j] * u[j][i];
-        }
-        // explicitly skip values which are near 0.
-        // FIXME, decide whether this makes sense if u[i][i] also near 0.
-        if curr.abs() <= rcond {
-            continue;
-        }
-        out[i] = curr / u[i][i];
-    }
-    out
-}
-
-/// QR solve an underdetermined system, where R < C.
-/// When computing the QR factorization, compute it for A^T instead.
-pub fn qr_solve_underdetermined<const R: usize, const C: usize>(
-    q: Matrix<C, R>,
-    r: Matrix<C, C>,
-    b: [F; R],
-) -> [F; C] {
-    assert!(R < C);
-    let rb = right_tri_transposed_solve(r, b);
-    vecmul(q, rb)
-}
-
-pub fn vecmul<const R: usize, const C: usize>(a: Matrix<R, C>, b: [F; C]) -> [F; R] {
+fn vecmul<const R: usize, const C: usize>(a: Matrix<R, C>, b: [F; C]) -> [F; R] {
     let mut out = [0.; R];
     for i in 0..R {
         for k in 0..C {
@@ -235,7 +173,7 @@ pub fn dyn_mgs_qr<const C: usize>(a: &mut [[F; C]], q: &mut Vec<[F; C]>) -> Matr
 }
 
 /// (RxC)^T (Rx1)
-pub fn dyn_transpose_vecmul<const C: usize>(a: &[[F; C]], b: impl Fn(usize) -> F) -> [F; C] {
+fn dyn_transpose_vecmul<const C: usize>(a: &[[F; C]], b: impl Fn(usize) -> F) -> [F; C] {
     let mut out = [0.; C];
     let nr = a.len();
     for i in 0..nr {
@@ -247,6 +185,8 @@ pub fn dyn_transpose_vecmul<const C: usize>(a: &[[F; C]], b: impl Fn(usize) -> F
     out
 }
 
+/// Solves the linear system QRx = b, where the number of rows in Q & b is dynamic, but the
+/// number of columns is fixed.
 pub fn dyn_qr_solve<const C: usize>(
     q: &[[F; C]],
     r: Matrix<C, C>,
@@ -270,7 +210,42 @@ fn test_dyn_qr_decomp() {
     );
 
     let x = dyn_qr_solve(&dq, dr, |_| 1.);
-    println!("{x:?}");
     assert!((x[0] - 0.33333).abs() < 1e-3);
     assert!((x[1] - 0.33333).abs() < 1e-3);
+}
+
+/// Solve a system defined by `U^t x = b`
+fn right_tri_transposed_solve<const R: usize, const C: usize>(
+    u: Matrix<C, C>,
+    b: [F; C],
+) -> [F; R] {
+    let mut out = [0.; R];
+    for i in 0..C {
+        let mut curr = b[i];
+        for j in 0..i {
+            curr -= out[j] * u[j][i];
+        }
+        out[i] = curr / u[i][i];
+    }
+    out
+}
+
+/// QR solve an underdetermined system, where R < C.
+/// When computing the QR factorization, compute it for A^T instead.
+pub fn qr_solve_underdetermined<const R: usize, const C: usize>(
+    q: Matrix<C, R>,
+    r: Matrix<R, R>,
+    b: [F; R],
+) -> [F; C] {
+    let rb: [F; R] = right_tri_transposed_solve(r, b);
+    vecmul(q, rb)
+}
+
+#[test]
+fn test_qr_underdetermined() {
+    let a: Matrix<3, 4> = [[1., 1., 1., 1.], [-1., 1., -1., 1.], [1., 1., -1., 1.]];
+    let (q, r): (Matrix<4, 3>, Matrix<3, 3>) = mgs_qr(transpose(a));
+    let b = [1.; 3];
+    let x: [F; 4] = qr_solve_underdetermined(q, r, b);
+    assert_eq!(vecmul(a, x), b);
 }
