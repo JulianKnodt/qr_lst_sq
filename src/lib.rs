@@ -223,8 +223,9 @@ fn right_tri_transposed_solve<const R: usize, const C: usize>(
     for i in 0..C {
         let mut curr = b[i];
         for j in 0..i {
-            curr -= out[j] * u[j][i];
+            curr -= out[j] * u[i][j];
         }
+        println!("curr/u[i][i] = {curr}/{} = {}, b[i] = {}", u[i][i], curr/u[i][i], b[i]);
         out[i] = curr / u[i][i];
     }
     out
@@ -238,6 +239,7 @@ pub fn qr_solve_underdetermined<const R: usize, const C: usize>(
     b: [F; R],
 ) -> [F; C] {
     let rb: [F; R] = right_tri_transposed_solve(r, b);
+    println!("rb={rb:?}");
     vecmul(q, rb)
 }
 
