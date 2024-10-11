@@ -43,7 +43,7 @@ pub fn mgs_qr<const R: usize, const C: usize>(a: Matrix<R, C>) -> (Matrix<R, C>,
     let mut r = [[0.; C]; C];
 
     // transpose for later convenience
-    let mut vs: Matrix<C, R> = from_fn(|i| from_fn(|j| a[j][i]));
+    let mut vs: Matrix<C, R> = transpose(a);
 
     for i in 0..C {
         let v: [_; R] = vs[i];
@@ -215,7 +215,8 @@ fn test_dyn_qr_decomp() {
 }
 
 /// Solve a system defined by `U^t x = b`
-fn right_tri_transposed_solve<const R: usize, const C: usize>(
+// TODO need to figure out why this is broken?
+fn lower_tri_solve<const R: usize, const C: usize>(
     u: Matrix<C, C>,
     b: [F; C],
 ) -> [F; R] {
@@ -225,7 +226,6 @@ fn right_tri_transposed_solve<const R: usize, const C: usize>(
         for j in 0..i {
             curr -= out[j] * u[i][j];
         }
-        println!("curr/u[i][i] = {curr}/{} = {}, b[i] = {}", u[i][i], curr/u[i][i], b[i]);
         out[i] = curr / u[i][i];
     }
     out
@@ -238,9 +238,7 @@ pub fn qr_solve_underdetermined<const R: usize, const C: usize>(
     r: Matrix<R, R>,
     b: [F; R],
 ) -> [F; C] {
-    let rb: [F; R] = right_tri_transposed_solve(r, b);
-    println!("rb={rb:?}");
-    vecmul(q, rb)
+    vecmul(q, lower_tri_solve(r, b))
 }
 
 #[test]
@@ -248,6 +246,19 @@ fn test_qr_underdetermined() {
     let a: Matrix<3, 4> = [[1., 1., 1., 1.], [-1., 1., -1., 1.], [1., 1., -1., 1.]];
     let (q, r): (Matrix<4, 3>, Matrix<3, 3>) = mgs_qr(transpose(a));
     let b = [1.; 3];
-    let x: [F; 4] = qr_solve_underdetermined(q, r, b);
-    assert_eq!(vecmul(a, x), b);
+    let x: [F; 4] = qr_solve_underdetermined(q, transpose(r), b);
+    assert_eq!(vecmul(a, x), b, "{x:?}");
+}
+
+#[test]
+fn test_qr_un2() {
+  let a = [
+    [-1., 0.846154, -0.846154, 1.,],
+    [-1., 1., -0.845154, 1.],
+    [0., -1., 0., 0.],
+  ];
+  let (q, r): (Matrix<4, 3>, Matrix<3, 3>) = mgs_qr(transpose(a));
+  let b = [0.346154, 0.333335, 0.];
+  let x: [F; 4] = qr_solve_underdetermined(q, r, b);
+  todo!("{x:?}");
 }
