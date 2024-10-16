@@ -7,3 +7,6 @@ edition = "2021"
 
 [features]
 f64 = []
+
+[dev-dependencies]
+quickcheck = "1.0.3"

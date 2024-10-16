@@ -8,6 +8,9 @@ pub type F = f32;
 #[cfg(feature = "f64")]
 pub type F = f64;
 
+#[cfg(test)]
+mod tests;
+
 use std::array::from_fn;
 
 type Matrix<const R: usize, const C: usize> = [[F; C]; R];
@@ -48,6 +51,10 @@ pub fn mgs_qr<const R: usize, const C: usize>(a: Matrix<R, C>) -> (Matrix<R, C>,
     for i in 0..C {
         let v: [_; R] = vs[i];
         r[i][i] = norm(v);
+        // no need for abs here since it should always be positive
+        if r[i][i] < F::EPSILON {
+            continue;
+        }
         let irii = r[i][i].recip();
         for j in 0..R {
             q[j][i] = irii * v[j];
@@ -107,7 +114,7 @@ fn vecmul<const R: usize, const C: usize>(a: Matrix<R, C>, b: [F; C]) -> [F; R] 
     out
 }
 
-/*
+#[cfg(test)]
 fn matmul<const R: usize, const C: usize, const C2: usize>(
     a: Matrix<R, C>,
     b: Matrix<C, C2>,
@@ -123,7 +130,6 @@ fn matmul<const R: usize, const C: usize, const C2: usize>(
 
     out
 }
-*/
 
 #[test]
 fn test_qr_decomp() {
@@ -216,10 +222,7 @@ fn test_dyn_qr_decomp() {
 
 /// Solve a system defined by `U^t x = b`
 // TODO need to figure out why this is broken?
-fn lower_tri_solve<const R: usize, const C: usize>(
-    u: Matrix<C, C>,
-    b: [F; C],
-) -> [F; R] {
+fn lower_tri_solve<const R: usize, const C: usize>(u: Matrix<C, C>, b: [F; C]) -> [F; R] {
     let mut out = [0.; R];
     for i in 0..C {
         let mut curr = b[i];
@@ -252,13 +255,13 @@ fn test_qr_underdetermined() {
 
 #[test]
 fn test_qr_un2() {
-  let a = [
-    [-1., 0.846154, -0.846154, 1.,],
-    [-1., 1., -0.845154, 1.],
-    [0., -1., 0., 0.],
-  ];
-  let (q, r): (Matrix<4, 3>, Matrix<3, 3>) = mgs_qr(transpose(a));
-  let b = [0.346154, 0.333335, 0.];
-  let x: [F; 4] = qr_solve_underdetermined(q, r, b);
-  todo!("{x:?}");
+    let a = [
+        [-1., 0.846154, -0.846154, 1.],
+        [-1., 1., -0.845154, 1.],
+        [0., -1., 0., 0.],
+    ];
+    let (q, r): (Matrix<4, 3>, Matrix<3, 3>) = mgs_qr(transpose(a));
+    let b = [0.346154, 0.333335, 0.];
+    let x: [F; 4] = qr_solve_underdetermined(q, r, b);
+    todo!("{x:?}");
 }
