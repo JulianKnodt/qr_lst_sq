@@ -162,6 +162,9 @@ pub fn dyn_mgs_qr<const C: usize>(a: &mut [[F; C]], q: &mut Vec<[F; C]>) -> Matr
     for i in 0..C {
         r[i][i] = norm_iter((0..nr).map(|ri| a[ri][i]));
         let irii = r[i][i].recip();
+        if irii < F::EPSILON {
+            continue;
+        }
         for ri in 0..nr {
             q[ri][i] = irii * a[ri][i];
         }
