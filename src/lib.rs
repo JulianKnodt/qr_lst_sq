@@ -161,10 +161,11 @@ pub fn dyn_mgs_qr<const C: usize>(a: &mut [[F; C]], q: &mut Vec<[F; C]>) -> Matr
 
     for i in 0..C {
         r[i][i] = norm_iter((0..nr).map(|ri| a[ri][i]));
-        let irii = r[i][i].recip();
-        if irii < F::EPSILON {
+        if r[i][i] < F::EPSILON {
             continue;
         }
+        let irii = r[i][i].recip();
+        assert!(irii.is_finite());
         for ri in 0..nr {
             q[ri][i] = irii * a[ri][i];
         }
@@ -201,7 +202,7 @@ pub fn dyn_qr_solve<const C: usize>(
     r: Matrix<C, C>,
     b: impl Fn(usize) -> F,
 ) -> [F; C] {
-    assert!(q.len() >= C);
+    assert!(q.len() >= C, "TODO handle case where there are fewer rows and cols");
     upper_right_triangular_solve(r, dyn_transpose_vecmul(q, b))
 }
 
