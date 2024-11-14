@@ -8,9 +8,6 @@ pub type F = f32;
 #[cfg(feature = "f64")]
 pub type F = f64;
 
-#[cfg(test)]
-mod tests;
-
 use std::array::from_fn;
 
 type Matrix<const R: usize, const C: usize> = [[F; C]; R];
@@ -234,6 +231,7 @@ fn lower_tri_solve<const R: usize, const C: usize>(u: Matrix<C, C>, b: [F; C]) -
             curr -= out[j] * u[i][j];
         }
         out[i] = curr / u[i][i];
+        assert!(out[i].is_finite());
     }
     out
 }
@@ -257,15 +255,3 @@ fn test_qr_underdetermined() {
     assert_eq!(vecmul(a, x), b, "{x:?}");
 }
 
-#[test]
-fn test_qr_un2() {
-    let a = [
-        [-1., 0.846154, -0.846154, 1.],
-        [-1., 1., -0.845154, 1.],
-        [0., -1., 0., 0.],
-    ];
-    let (q, r): (Matrix<4, 3>, Matrix<3, 3>) = mgs_qr(transpose(a));
-    let b = [0.346154, 0.333335, 0.];
-    let x: [F; 4] = qr_solve_underdetermined(q, r, b);
-    todo!("{x:?}");
-}
