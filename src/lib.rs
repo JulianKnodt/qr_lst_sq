@@ -17,18 +17,25 @@ fn dot<const N: usize>(a: [F; N], b: [F; N]) -> F {
 }
 
 fn norm<const N: usize>(v: [F; N]) -> F {
-    dot(v, v).max(0.).sqrt()
+    dot(v, v).sqrt()
 }
 
 fn norm_iter(v: impl IntoIterator<Item = F>) -> F {
     v.into_iter().map(|v| v * v).sum::<F>().max(0.).sqrt()
 }
 
+/*
 fn sub<const N: usize>(a: [F; N], b: [F; N]) -> [F; N] {
     from_fn(|i| a[i] - b[i])
 }
+
 fn kmul<const N: usize>(k: F, a: [F; N]) -> [F; N] {
     a.map(|v| v * k)
+}
+*/
+
+fn fma<const N: usize>(ak: F, a1: [F; N], m: [F; N]) -> [F; N] {
+    std::array::from_fn(|i| ak.mul_add(a1[i], m[i]))
 }
 
 /// Transpose a 2D array [[F; C]; R] -> [[F; R]; C].
@@ -48,20 +55,22 @@ pub fn mgs_qr<const R: usize, const C: usize>(a: Matrix<R, C>) -> (Matrix<R, C>,
     for i in 0..C {
         let v: [_; R] = vs[i];
         r[i][i] = norm(v);
+        assert_ne!(r[i][i], 0.);
+
         // no need for abs here since it should always be positive
-        if r[i][i] < F::EPSILON {
+        if r[i][i] < F::EPSILON * (R * C) as F {
             continue;
         }
-        let irii = r[i][i].recip();
         for j in 0..R {
-            q[j][i] = irii * v[j];
+            // do not precompute recip(r[i][i]) to avoid numerical loss
+            q[j][i] = v[j] / r[i][i];
         }
         let q_i: [_; R] = from_fn(|j| q[j][i]);
 
         // current column
         for j in i..C {
             r[i][j] = dot(q_i, vs[j]);
-            vs[j] = sub(vs[j], kmul(r[i][j], q_i));
+            vs[j] = fma(-r[i][j], q_i, vs[j]);
         }
     }
 
@@ -69,18 +78,20 @@ pub fn mgs_qr<const R: usize, const C: usize>(a: Matrix<R, C>) -> (Matrix<R, C>,
 }
 
 fn upper_right_triangular_solve<const N: usize>(u: Matrix<N, N>, b: [F; N]) -> [F; N] {
-    let mut out = [0.; N];
+    let mut out = [0. as F; N];
     let rcond = N as F * F::EPSILON;
     for i in (0..N).rev() {
         let mut curr = b[i];
         for j in i..N {
-            curr -= out[j] * u[i][j];
+            curr = out[j].mul_add(-u[i][j], curr);
+            //curr -= out[j] * u[i][j];
         }
         // explicitly skip values which are near 0.
         // FIXME, decide whether this makes sense if u[i][i] also near 0.
         if curr.abs() <= rcond {
             continue;
         }
+        assert!(u[i][i].abs() >= rcond, "{curr} {:e} {u:?} {b:?}", u[i][i]);
         out[i] = curr / u[i][i];
     }
     out
@@ -105,7 +116,7 @@ fn vecmul<const R: usize, const C: usize>(a: Matrix<R, C>, b: [F; C]) -> [F; R] 
     let mut out = [0.; R];
     for i in 0..R {
         for k in 0..C {
-            out[i] += a[i][k] * b[k];
+            out[i] = a[i][k].mul_add(b[k], out[i]);
         }
     }
     out
@@ -120,7 +131,7 @@ fn matmul<const R: usize, const C: usize, const C2: usize>(
     for i in 0..R {
         for j in 0..C2 {
             for k in 0..C {
-                out[i][j] += a[i][k] * b[k][j];
+                out[i][j] = a[i][k].mul_add(b[k][j], out[i][j]);
             }
         }
     }
@@ -161,17 +172,17 @@ pub fn dyn_mgs_qr<const C: usize>(a: &mut [[F; C]], q: &mut Vec<[F; C]>) -> Matr
         if r[i][i] < F::EPSILON {
             continue;
         }
-        let irii = r[i][i].recip();
-        assert!(irii.is_finite());
+
+        assert_ne!(r[i][i], 0.);
         for ri in 0..nr {
-            q[ri][i] = irii * a[ri][i];
+            q[ri][i] = a[ri][i] / r[i][i];
         }
 
         for j in i..C {
             r[i][j] = (0..nr).map(|ri| a[ri][j] * q[ri][i]).sum::<F>();
             let rij = r[i][j];
             for ri in 0..nr {
-                a[ri][j] -= rij * q[ri][i];
+                a[ri][j] = rij.mul_add(-q[ri][i], a[ri][j]);
             }
         }
     }
@@ -186,7 +197,7 @@ fn dyn_transpose_vecmul<const C: usize>(a: &[[F; C]], b: impl Fn(usize) -> F) ->
     for i in 0..nr {
         let b_i = b(i);
         for j in 0..C {
-            out[j] += a[i][j] * b_i;
+            out[j] = a[i][j].mul_add(b_i, out[j]);
         }
     }
     out
@@ -199,7 +210,10 @@ pub fn dyn_qr_solve<const C: usize>(
     r: Matrix<C, C>,
     b: impl Fn(usize) -> F,
 ) -> [F; C] {
-    assert!(q.len() >= C, "TODO handle case where there are fewer rows and cols");
+    assert!(
+        q.len() >= C,
+        "TODO handle case where there are fewer rows and cols"
+    );
     upper_right_triangular_solve(r, dyn_transpose_vecmul(q, b))
 }
 
@@ -224,11 +238,11 @@ fn test_dyn_qr_decomp() {
 /// Solve a system defined by `U^t x = b`
 // TODO need to figure out why this is broken?
 fn lower_tri_solve<const R: usize, const C: usize>(u: Matrix<C, C>, b: [F; C]) -> [F; R] {
-    let mut out = [0.; R];
+    let mut out = [0. as F; R];
     for i in 0..C {
         let mut curr = b[i];
         for j in 0..i {
-            curr -= out[j] * u[i][j];
+            curr = out[j].mul_add(-u[i][j], curr);
         }
         out[i] = curr / u[i][i];
         assert!(out[i].is_finite());
@@ -254,4 +268,3 @@ fn test_qr_underdetermined() {
     let x: [F; 4] = qr_solve_underdetermined(q, transpose(r), b);
     assert_eq!(vecmul(a, x), b, "{x:?}");
 }
-
