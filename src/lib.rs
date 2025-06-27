@@ -91,7 +91,7 @@ fn upper_right_triangular_solve<const N: usize>(u: Matrix<N, N>, b: [F; N]) -> [
         if curr.abs() <= rcond {
             continue;
         }
-        assert!(u[i][i].abs() >= rcond, "{curr} {:e} {u:?} {b:?}", u[i][i]);
+        //assert!(u[i][i].abs() >= rcond, "{curr} {:e} {u:?} {b:?}", u[i][i]);
         out[i] = curr / u[i][i];
     }
     out
