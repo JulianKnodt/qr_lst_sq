@@ -16,6 +16,7 @@ fn dot<const N: usize>(a: [F; N], b: [F; N]) -> F {
     (0..N).map(|i| a[i] * b[i]).sum::<F>()
 }
 
+#[inline]
 fn norm<const N: usize>(v: [F; N]) -> F {
     dot(v, v).sqrt()
 }
@@ -24,27 +25,27 @@ fn norm_iter(v: impl IntoIterator<Item = F>) -> F {
     v.into_iter().map(|v| v * v).sum::<F>().max(0.).sqrt()
 }
 
-/*
-fn sub<const N: usize>(a: [F; N], b: [F; N]) -> [F; N] {
-    from_fn(|i| a[i] - b[i])
-}
-
-fn kmul<const N: usize>(k: F, a: [F; N]) -> [F; N] {
-    a.map(|v| v * k)
-}
-*/
-
+#[inline]
+#[cfg(feature = "fused_mul_add")]
 fn fma<const N: usize>(ak: F, a1: [F; N], m: [F; N]) -> [F; N] {
-    std::array::from_fn(|i| ak.mul_add(a1[i], m[i]))
+    from_fn(|i| ak.mul_add(a1[i], m[i]))
+}
+
+#[inline]
+#[cfg(not(feature = "fused_mul_add"))]
+fn fma<const N: usize>(ak: F, a1: [F; N], m: [F; N]) -> [F; N] {
+    from_fn(|i| ak * a1[i] + m[i])
 }
 
 /// Transpose a 2D array [[F; C]; R] -> [[F; R]; C].
+#[inline]
 pub fn transpose<const M: usize, const N: usize>(a: Matrix<M, N>) -> Matrix<N, M> {
     from_fn(|i| from_fn(|j| a[j][i]))
 }
 
 /// Decompose A: [[F; C]; R] into (Q,R): ([[F; C]; R], [[F; C];C]), where A = QR.
 /// `mgs` stands for modified gram schmidt, which is the algorithm for QR decomposition.
+#[inline]
 pub fn mgs_qr<const R: usize, const C: usize>(a: Matrix<R, C>) -> (Matrix<R, C>, Matrix<C, C>) {
     let mut q = [[0.; C]; R];
     let mut r = [[0.; C]; C];
@@ -55,7 +56,7 @@ pub fn mgs_qr<const R: usize, const C: usize>(a: Matrix<R, C>) -> (Matrix<R, C>,
     for i in 0..C {
         let v: [_; R] = vs[i];
         r[i][i] = norm(v);
-        assert_ne!(r[i][i], 0.);
+        debug_assert_ne!(r[i][i], 0.);
 
         // no need for abs here since it should always be positive
         if r[i][i] < F::EPSILON * (R * C) as F {
@@ -77,15 +78,30 @@ pub fn mgs_qr<const R: usize, const C: usize>(a: Matrix<R, C>) -> (Matrix<R, C>,
     (q, r)
 }
 
+/*
+#[cfg(feature = "fused_mul_add")]
+fn mul_add(a: F, b: F, c: F) -> F {
+    a.mul_add(b, c)
+}
+
+#[cfg(not(feature = "fused_mul_add"))]
+fn mul_add(a: F, b: F, c: F) -> F {
+    a * b + c
+}
+*/
+
 fn upper_right_triangular_solve<const N: usize>(u: Matrix<N, N>, b: [F; N]) -> [F; N] {
     let mut out = [0. as F; N];
     let rcond = N as F * F::EPSILON;
     for i in (0..N).rev() {
+        let curr = b[i] - (i..N).map(|j| out[j] * u[i][j]).sum::<F>();
+        /*
         let mut curr = b[i];
         for j in i..N {
-            curr = out[j].mul_add(-u[i][j], curr);
+            curr = mul_add(out[j], -u[i][j], curr);
             //curr -= out[j] * u[i][j];
         }
+        */
         // explicitly skip values which are near 0.
         // FIXME, decide whether this makes sense if u[i][i] also near 0.
         if curr.abs() <= rcond {
@@ -108,20 +124,37 @@ pub fn qr_solve<const R: usize, const C: usize>(
         R >= C,
         "Underdetermined system, decompose A^T and pass to qr_solve_underdetermined"
     );
-    let qtb = vecmul(transpose(q), b);
+    let qtb = vecmul_trans_a(q, b);
     upper_right_triangular_solve(r, qtb)
 }
 
 fn vecmul<const R: usize, const C: usize>(a: Matrix<R, C>, b: [F; C]) -> [F; R] {
+    from_fn(|i| (0..C).map(|k| a[i][k] * b[k]).sum())
+    /*
     let mut out = [0.; R];
     for i in 0..R {
         for k in 0..C {
-            out[i] = a[i][k].mul_add(b[k], out[i]);
+            out[i] = mul_add(a[i][k], b[k], out[i]);
         }
     }
     out
+    */
 }
 
+fn vecmul_trans_a<const R: usize, const C: usize>(a: Matrix<C, R>, b: [F; C]) -> [F; R] {
+    from_fn(|i| (0..C).map(|k| a[k][i] * b[k]).sum())
+    /*
+    let mut out = [0.; R];
+    for i in 0..R {
+        for k in 0..C {
+            out[i] = mul_add(a[i][k], b[k], out[i]);
+        }
+    }
+    out
+    */
+}
+
+#[allow(unused)]
 #[cfg(test)]
 fn matmul<const R: usize, const C: usize, const C2: usize>(
     a: Matrix<R, C>,
@@ -240,12 +273,15 @@ fn test_dyn_qr_decomp() {
 fn lower_tri_solve<const R: usize, const C: usize>(u: Matrix<C, C>, b: [F; C]) -> [F; R] {
     let mut out = [0. as F; R];
     for i in 0..C {
+        let curr = b[i] - (0..i).map(|j| out[j] * u[i][j]).sum::<F>();
+        /*
         let mut curr = b[i];
         for j in 0..i {
             curr = out[j].mul_add(-u[i][j], curr);
         }
+        */
         out[i] = curr / u[i][i];
-        assert!(out[i].is_finite());
+        debug_assert!(out[i].is_finite());
     }
     out
 }
